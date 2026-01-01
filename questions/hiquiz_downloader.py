@@ -14,22 +14,27 @@ class HiQuizDownloader:
     def __init__(self):
         self.base_url = "https://hiquiz.co.kr"
         self.games = {
-            'kkong': '꽁꽁',
-            'ollao': '올라올라(꼬로록)',
-            'ox': 'OX',
-            'crossword': '가로세로'
+            'kkong': {'name': '꽁꽁', 'url': 'kkong.csv'},
+            'ollao': {'name': '올라올라(꼬로록)', 'url': 'questions.csv'},
+            'oxxo': {'name': 'OX,XO', 'url': 'oxxo.csv'},
+            'garo': {'name': '가로세로', 'url': 'garo.csv'}
         }
 
     def download_csv(self, game_key: str) -> List[Dict]:
         """특정 게임의 CSV 파일을 다운로드하고 파싱합니다.
         
         Args:
-            game_key: 게임 키 ('kkong', 'ollao', 'ox', 'crossword')
+            game_key: 게임 키 ('kkong', 'ollao', 'oxxo', 'garo')
             
         Returns:
             문제 리스트
         """
-        csv_url = f"{self.base_url}/{game_key}.csv"
+        game_info = self.games.get(game_key)
+        if not game_info:
+            print(f"✗ 알 수 없는 게임: {game_key}")
+            return []
+        
+        csv_url = f"{self.base_url}/{game_info['url']}"
         
         try:
             print(f"다운로드 중: {csv_url}")
@@ -37,19 +42,37 @@ class HiQuizDownloader:
             response.encoding = 'utf-8'
             response.raise_for_status()
             
-            # CSV 파싱
+            # CSV 파싱 - 탭 구분자 시도
             csv_content = StringIO(response.text)
             reader = csv.DictReader(csv_content, delimiter='\t')
             
             questions = []
             for idx, row in enumerate(reader, 1):
-                question_data = {
-                    'id': idx,
-                    'question': row.get('Question', '').strip(),
-                    'answer': row.get('Answer', '').strip(),
-                    'game': self.games.get(game_key, game_key)
-                }
-                questions.append(question_data)
+                question = row.get('Question', '').strip() if row.get('Question') else ''
+                answer = row.get('Answer', '').strip() if row.get('Answer') else ''
+                
+                if question:  # 문제가 있는 경우만 추가
+                    question_data = {
+                        'id': idx,
+                        'question': question,
+                        'answer': answer,
+                        'game': game_info['name']
+                    }
+                    questions.append(question_data)
+            
+            # 탭 구분자로 파싱 실패 시 공백 기반 파싱 시도
+            if not questions:
+                lines = response.text.strip().split('\n')
+                for idx, line in enumerate(lines, 1):
+                    parts = line.rsplit(maxsplit=1)  # 마지막 공백 기준으로 분리
+                    if len(parts) == 2:
+                        question_data = {
+                            'id': idx,
+                            'question': parts[0].strip(),
+                            'answer': parts[1].strip(),
+                            'game': game_info['name']
+                        }
+                        questions.append(question_data)
             
             print(f"✓ {len(questions)}개 문제 다운로드 완료")
             return questions
@@ -73,8 +96,8 @@ class HiQuizDownloader:
         all_data = {}
         print("=== HiQuiz 문제 다운로드 시작 ===\n")
         
-        for game_key, game_name in self.games.items():
-            print(f"[{game_name}] 다운로드 중...")
+        for game_key, game_info in self.games.items():
+            print(f"[{game_info['name']}] 다운로드 중...")
             questions = self.download_csv(game_key)
             
             if questions:
@@ -82,7 +105,7 @@ class HiQuizDownloader:
                 
                 # 개별 파일로 저장
                 if output_format == 'json':
-                    self.save_as_json(questions, f"{game_key}_questions.json", game_name)
+                    self.save_as_json(questions, f"{game_key}_questions.json", game_info['name'])
                 elif output_format == 'csv':
                     self.save_as_csv(questions, f"{game_key}_questions.csv")
             
@@ -170,8 +193,8 @@ def main():
     elif choice == '3':
         # 특정 게임만 다운로드
         print("\n게임 선택:")
-        for idx, (key, name) in enumerate(downloader.games.items(), 1):
-            print(f"{idx}. {name} ({key})")
+        for idx, (key, info) in enumerate(downloader.games.items(), 1):
+            print(f"{idx}. {info['name']} ({key})")
         
         game_choice = input("\n선택 (1-4): ").strip()
         game_keys = list(downloader.games.keys())
@@ -184,7 +207,7 @@ def main():
                 downloader.save_as_json(
                     questions, 
                     f"{selected_key}_questions.json",
-                    downloader.games[selected_key]
+                    downloader.games[selected_key]['name']
                 )
                 print(f"\n✓ {len(questions)}개 문제 저장 완료")
         except (IndexError, ValueError):
